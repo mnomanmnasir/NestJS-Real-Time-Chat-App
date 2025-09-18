@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NestJS Chat App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .chat-container {
+            display: flex;
+            flex-direction: column;
+            height: 80vh;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: white;
+        }
+        .chat-header {
+            background-color: #4a6fa5;
+            color: white;
+            padding: 15px;
+            text-align: center;
+        }
+        .chat-messages {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 5px;
+            background-color: #e9f5ff;
+            max-width: 70%;
+        }
+        .message.sent {
+            margin-left: auto;
+            background-color: #dcf8c6;
+        }
+        .message-info {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+        .chat-input {
+            display: flex;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-top: 1px solid #ddd;
+        }
+        #messageInput {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #4a6fa5;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #3a5a80;
+        }
+        .login-container {
+            text-align: center;
+            margin-top: 50px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="loginContainer" class="login-container">
+        <h1>Welcome to Chat App</h1>
+        <div>
+            <input type="text" id="usernameInput" placeholder="Enter your username" />
+            <input type="text" id="roomInput" placeholder="Enter room name" value="general" />
+            <button id="joinButton">Join Chat</button>
+        </div>
+    </div>
+
+    <div id="chatContainer" class="chat-container hidden">
+        <div class="chat-header">
+            <h2>Chat Room: <span id="roomName"></span></h2>
+            <p>Welcome, <span id="currentUser"></span></p>
+        </div>
+        <div id="chatMessages" class="chat-messages"></div>
+        <div class="chat-input">
+            <input type="text" id="messageInput" placeholder="Type your message..." />
+            <button id="sendButton">Send</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>
+        // DOM Elements
+        const loginContainer = document.getElementById('loginContainer');
+        const chatContainer = document.getElementById('chatContainer');
+        const usernameInput = document.getElementById('usernameInput');
+        const roomInput = document.getElementById('roomInput');
+        const joinButton = document.getElementById('joinButton');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const chatMessages = document.getElementById('chatMessages');
+        const roomName = document.getElementById('roomName');
+        const currentUser = document.getElementById('currentUser');
+
+        let socket;
+        let currentUsername = '';
+        let currentRoom = '';
+
+        // Connect to WebSocket server
+        function connectToChat(username, room) {
+            // Connect to the WebSocket server
+            socket = io('http://localhost:3000/chat', {
+                transports: ['websocket'],
+                reconnection: true,
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000,
+            });
+
+            // Connection established
+            socket.on('connect', () => {
+                console.log('Connected to WebSocket server');
+                
+                // Join the specified room
+                socket.emit('joinRoom', { username, room });
+            });
+
+            // Handle connection error
+            socket.on('connect_error', (error) => {
+                console.error('Connection error:', error);
+                alert('Failed to connect to the chat server. Please try again.');
+            });
+
+            // Handle successful room join
+            socket.on('roomJoined', (data) => {
+                console.log('Room joined:', data);
+                currentUsername = username;
+                currentRoom = room;
+                roomName.textContent = room;
+                currentUser.textContent = username;
+                
+                // Show chat container and hide login
+                loginContainer.classList.add('hidden');
+                chatContainer.classList.remove('hidden');
+                messageInput.focus();
+                
+                // Display welcome message
+                addSystemMessage(`Welcome to ${room}, ${username}!`);
+            });
+
+            // Handle new message received
+            socket.on('newMessage', (message) => {
+                addMessage(message.username, message.message, message.timestamp, false);
+            });
+
+            // Handle user joined notification
+            socket.on('userJoined', (data) => {
+                addSystemMessage(`${data.username} has joined the room`);
+            });
+
+            // Handle user left notification
+            socket.on('userLeft', (data) => {
+                addSystemMessage(`${data.username} has left the room`);
+            });
+
+            // Handle room list update
+            socket.on('roomList', (data) => {
+                console.log('Available rooms:', data.rooms);
+            });
+
+            // Handle errors
+            socket.on('error', (error) => {
+                console.error('Error:', error);
+                alert(`Error: ${error.message || 'Unknown error occurred'}`);
+            });
+        }
+
+        // Add a message to the chat UI
+        function addMessage(sender, message, timestamp, isSent = true) {
+            const messageElement = document.createElement('div');
+            messageElement.className = `message ${isSent ? 'sent' : ''}`;
+            
+            const time = new Date(timestamp).toLocaleTimeString();
+            messageElement.innerHTML = `
+                <div class="message-info">${sender} - ${time}</div>
+                <div class="message-text">${message}</div>
+            `;
+            
+            chatMessages.appendChild(messageElement);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Add a system message to the chat UI
+        function addSystemMessage(message) {
+            const messageElement = document.createElement('div');
+            messageElement.className = 'message system-message';
+            messageElement.textContent = message;
+            messageElement.style.textAlign = 'center';
+            messageElement.style.fontStyle = 'italic';
+            messageElement.style.color = '#666';
+            
+            chatMessages.appendChild(messageElement);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // Event Listeners
+        joinButton.addEventListener('click', () => {
+            const username = usernameInput.value.trim();
+            const room = roomInput.value.trim() || 'general';
+            
+            if (username) {
+                connectToChat(username, room);
+            } else {
+                alert('Please enter a username');
+            }
+        });
+
+        // Send message on button click
+        sendButton.addEventListener('click', sendMessage);
+        
+        // Send message on Enter key
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        // Function to send a message
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            
+            if (message && socket) {
+                // Emit the message to the server
+                socket.emit('sendMessage', {
+                    message: message,
+                    room: currentRoom
+                });
+                
+                // Add the message to the UI
+                addMessage('You', message, new Date(), true);
+                
+                // Clear the input
+                messageInput.value = '';
+                messageInput.focus();
+            }
+        }
+    </script>
+</body>
+</html>
